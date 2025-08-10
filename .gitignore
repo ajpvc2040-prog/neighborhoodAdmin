@@ -1,0 +1,19 @@
+# Node
+node_modules/
+.env
+.env.*
+dist/
+build/
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+# Editor
+.vscode/
+.DS_Store
+# System
+Thumbs.db
+# Docker
+*.local
+# Others
+*.log
