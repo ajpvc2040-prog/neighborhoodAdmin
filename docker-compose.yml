@@ -7,4 +7,29 @@ services:
     restart: unless-stopped
     environment:
       - NODE_ENV=production
-# Puedes agregar el backend y la base de datos aquí después
+
+  backend:
+    build: ./backend
+    ports:
+      - "4000:4000"
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=development
+      - PORT=4000
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: adminpass
+      POSTGRES_DB: neighborhood
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

@@ -17,3 +17,47 @@ Thumbs.db
 *.local
 # Others
 *.log
+
+# TypeScript
+*.tsbuildinfo
+frontend/src/*.js
+frontend/src/*.jsx
+frontend/src/*.js.map
+frontend/src/*.d.ts
+frontend/src/*.d.ts.map
+frontend/src/*.test.*
+frontend/src/REMOVE_ME.txt
+backend/*.js
+backend/*.js.map
+backend/*.d.ts
+backend/*.d.ts.map
+backend/*.test.*
+backend/REMOVE_ME.txt
+
+# Coverage
+coverage/
+
+# SQLite/DB/Backups
+*.sqlite
+*.db
+*.bak
+
+# Package archives
+*.tgz
+
+# Lock files (alternativos)
+pnpm-lock.yaml
+
+# IDEs
+.idea/
+.history/
+.swp
+.swo
+
+# Docker output
+docker-output/
+
+# Otros temporales
+*.tmp
+*.temp
+*.cache
