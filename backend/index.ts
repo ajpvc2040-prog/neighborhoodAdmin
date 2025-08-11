@@ -16,7 +16,7 @@ app.use(cors());
 app.use(express.json());
 
 // Middleware para verificar JWT
-type JwtPayload = { id: number; username: string };
+type JwtPayload = { id: number; username: string; role: string };
 function authenticateToken(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -35,11 +35,12 @@ app.get('/', (req: Request, res: Response) => {
 
 // Registro de usuario
 app.post('/register', async (req: Request, res: Response) => {
-  const { username, password } = req.body;
+  const { username, password, role } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Usuario y contraseña requeridos' });
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
-    const result = await pool.query('INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id, username', [username, hashedPassword]);
+    const userRole = role && role === 'admin' ? 'admin' : 'user';
+    const result = await pool.query('INSERT INTO users (username, password, role) VALUES ($1, $2, $3) RETURNING id, username, role', [username, hashedPassword, userRole]);
     res.status(201).json({ user: result.rows[0] });
   } catch (err: any) {
     if (err.code === '23505') {
@@ -53,16 +54,30 @@ app.post('/register', async (req: Request, res: Response) => {
 // Login de usuario
 app.post('/login', async (req: Request, res: Response) => {
   const { username, password } = req.body;
+  // Compara el hash calculado del password recibido con el hash de la base
+  console.log('Login request:', { username, password });
   if (!username || !password) return res.status(400).json({ error: 'Usuario y contraseña requeridos' });
   try {
     const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
     const user = result.rows[0];
-    if (!user) return res.status(401).json({ error: 'Credenciales inválidas' });
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) return res.status(401).json({ error: 'Credenciales inválidas' });
-    const token = jwt.sign({ id: user.id, username: user.username }, process.env.JWT_SECRET as string, { expiresIn: '1h' });
-    res.json({ token });
+    console.log('DB user:', user);
+    if (!user) {
+      console.log('No user found for username:', username);
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+    // Compara la contraseña recibida con el hash usando bcrypt.compare
+  console.log('Password recibido:', password, '| Length:', password.length);
+  console.log('Hash en base:', user.password, '| Length:', user.password.length);
+  const valid = await bcrypt.compare(password, user.password);
+  console.log('Password valid?', valid);
+    if (!valid) {
+      console.log('Password mismatch for user:', username);
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+    const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, process.env.JWT_SECRET as string, { expiresIn: '1h' });
+    res.json({ token, role: user.role });
   } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Error en el servidor' });
   }
 });
@@ -76,7 +91,7 @@ app.get('/protected', authenticateToken, (req: Request, res: Response) => {
 // Listar todos los usuarios (protegido)
 app.get('/users', authenticateToken, async (req: Request, res: Response) => {
   try {
-    const result = await pool.query('SELECT id, username FROM users');
+    const result = await pool.query('SELECT id, username, role FROM users');
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: 'Error en el servidor' });
@@ -86,7 +101,7 @@ app.get('/users', authenticateToken, async (req: Request, res: Response) => {
 // Obtener usuario por id (protegido)
 app.get('/users/:id', authenticateToken, async (req: Request, res: Response) => {
   try {
-    const result = await pool.query('SELECT id, username FROM users WHERE id = $1', [req.params.id]);
+    const result = await pool.query('SELECT id, username, role FROM users WHERE id = $1', [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
     res.json(result.rows[0]);
   } catch (err) {
@@ -96,11 +111,12 @@ app.get('/users/:id', authenticateToken, async (req: Request, res: Response) => 
 
 // Crear usuario (registro público, ya existe como /register)
 app.post('/users', async (req: Request, res: Response) => {
-  const { username, password } = req.body;
+  const { username, password, role } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Usuario y contraseña requeridos' });
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
-    const result = await pool.query('INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id, username', [username, hashedPassword]);
+    const userRole = role && role === 'admin' ? 'admin' : 'user';
+    const result = await pool.query('INSERT INTO users (username, password, role) VALUES ($1, $2, $3) RETURNING id, username, role', [username, hashedPassword, userRole]);
     res.status(201).json({ user: result.rows[0] });
   } catch (err: any) {
     if (err.code === '23505') {
@@ -113,8 +129,8 @@ app.post('/users', async (req: Request, res: Response) => {
 
 // Actualizar usuario (protegido)
 app.put('/users/:id', authenticateToken, async (req: Request, res: Response) => {
-  const { username, password } = req.body;
-  if (!username && !password) return res.status(400).json({ error: 'Nada para actualizar' });
+  const { username, password, role } = req.body;
+  if (!username && !password && !role) return res.status(400).json({ error: 'Nada para actualizar' });
   try {
     let query = 'UPDATE users SET ';
     const params: any[] = [];
@@ -128,8 +144,13 @@ app.put('/users/:id', authenticateToken, async (req: Request, res: Response) => 
       params.push(hashedPassword);
       query += `password = $${params.length}`;
     }
+    if (role) {
+      if (params.length > 0) query += ', ';
+      params.push(role);
+      query += `role = $${params.length}`;
+    }
     params.push(req.params.id);
-    query += ` WHERE id = $${params.length} RETURNING id, username`;
+    query += ` WHERE id = $${params.length} RETURNING id, username, role`;
     const result = await pool.query(query, params);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
     res.json(result.rows[0]);
@@ -141,7 +162,7 @@ app.put('/users/:id', authenticateToken, async (req: Request, res: Response) => 
 // Eliminar usuario (protegido)
 app.delete('/users/:id', authenticateToken, async (req: Request, res: Response) => {
   try {
-    const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING id, username', [req.params.id]);
+    const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING id, username, role', [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
     res.json({ deleted: result.rows[0] });
   } catch (err) {
@@ -149,17 +170,6 @@ app.delete('/users/:id', authenticateToken, async (req: Request, res: Response) 
   }
 });
 
-// Crear tabla de usuarios si no existe
-async function createUsersTable() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
-      username VARCHAR(50) UNIQUE NOT NULL,
-      password VARCHAR(255) NOT NULL
-    );
-  `);
-}
-createUsersTable();
 
 app.listen(PORT, () => {
   console.log(`Servidor backend escuchando en http://localhost:${PORT}`);

@@ -3,5 +3,6 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
 COPY . .
+RUN npx tsc
 EXPOSE 4000
-CMD ["node", "index.js"]
+CMD ["node", "dist/index.js"]
