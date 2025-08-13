@@ -1,3 +1,4 @@
+// ...existing code...
 
 const dotenv = require('dotenv');
 dotenv.config();
@@ -10,8 +11,54 @@ import type { Request, Response, NextFunction } from 'express';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+console.log('PGHOST en runtime:', process.env.PGHOST);
 const pool = new Pool();
 
+app.use(cors());
+app.use(express.json());
+
+// Middleware para verificar JWT
+
+// --- Neighborhood API ---
+// Obtener configuración del vecindario (solo admin)
+app.get('/neighborhood', authenticateToken, async (req: Request, res: Response) => {
+  try {
+    if ((req as any).user.role !== 'admin') return res.status(403).json({ error: 'Solo admin puede ver la configuración.' });
+    const result = await pool.query('SELECT * FROM neighborhood ORDER BY id DESC LIMIT 1');
+    if (result.rows.length === 0) return res.json(null);
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
+
+// Guardar/actualizar configuración del vecindario (solo admin)
+app.post('/neighborhood', authenticateToken, async (req: Request, res: Response) => {
+  try {
+    if ((req as any).user.role !== 'admin') return res.status(403).json({ error: 'Solo admin puede modificar la configuración.' });
+    const { name, periodicity, amount } = req.body;
+    if (!name || !periodicity || typeof amount !== 'number') {
+      return res.status(400).json({ error: 'Faltan datos requeridos.' });
+    }
+    // Solo se permite un registro, así que actualiza si existe, si no, inserta
+    const existing = await pool.query('SELECT id FROM neighborhood ORDER BY id DESC LIMIT 1');
+    let result;
+    if (existing.rows.length > 0) {
+      result = await pool.query(
+        'UPDATE neighborhood SET name = $1, periodicity = $2, amount = $3, updated_at = NOW() WHERE id = $4 RETURNING *',
+        [name, periodicity, amount, existing.rows[0].id]
+      );
+    } else {
+      result = await pool.query(
+        'INSERT INTO neighborhood (name, periodicity, amount) VALUES ($1, $2, $3) RETURNING *',
+        [name, periodicity, amount]
+      );
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
 app.use(cors());
 app.use(express.json());
 
@@ -170,6 +217,60 @@ app.delete('/users/:id', authenticateToken, async (req: Request, res: Response) 
   }
 });
 
+
+
+// --- Houses API ---
+// Listar casas (solo admin)
+app.get('/houses', authenticateToken, async (req: Request, res: Response) => {
+  if ((req as any).user.role !== 'admin') return res.status(403).json({ error: 'Solo admin puede ver las casas.' });
+  try {
+    const result = await pool.query('SELECT * FROM houses ORDER BY id');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
+
+// Crear casa (solo admin)
+app.post('/houses', authenticateToken, async (req: Request, res: Response) => {
+  if ((req as any).user.role !== 'admin') return res.status(403).json({ error: 'Solo admin puede agregar casas.' });
+  const { id, owner } = req.body;
+  if (!id) return res.status(400).json({ error: 'ID de casa requerido.' });
+  try {
+    // Validar que no exista la casa
+    const exists = await pool.query('SELECT id FROM houses WHERE id = $1', [id]);
+    if (exists.rows.length > 0) return res.status(409).json({ error: 'Ya existe una casa con ese ID.' });
+    const result = await pool.query('INSERT INTO houses (id, owner) VALUES ($1, $2) RETURNING *', [id, owner || null]);
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
+
+// Actualizar casa (solo admin)
+app.put('/houses/:id', authenticateToken, async (req: Request, res: Response) => {
+  if ((req as any).user.role !== 'admin') return res.status(403).json({ error: 'Solo admin puede modificar casas.' });
+  const { owner } = req.body;
+  try {
+    const result = await pool.query('UPDATE houses SET owner = $1, updated_at = NOW() WHERE id = $2 RETURNING *', [owner || null, req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Casa no encontrada.' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
+
+// Eliminar casa (solo admin)
+app.delete('/houses/:id', authenticateToken, async (req: Request, res: Response) => {
+  if ((req as any).user.role !== 'admin') return res.status(403).json({ error: 'Solo admin puede eliminar casas.' });
+  try {
+    const result = await pool.query('DELETE FROM houses WHERE id = $1 RETURNING *', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Casa no encontrada.' });
+    res.json({ deleted: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Servidor backend escuchando en http://localhost:${PORT}`);

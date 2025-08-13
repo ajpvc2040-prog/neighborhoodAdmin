@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Login from './Login';
 import UserIcon from './UserIcon';
+
+import Neighborhood from './Neighborhood';
+import Houses from './Houses';
 import './App.css';
 
 
@@ -18,6 +21,16 @@ const App: React.FC = () => {
   const [role, setRole] = useState<string>(localStorage.getItem('role') || '');
   const [username, setUsername] = useState<string>('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [adminView, setAdminView] = useState<string>('');
+
+  // Mostrar menú admin automáticamente si el usuario es admin
+  useEffect(() => {
+    if (role === 'admin') {
+      setAdminView((prev) => prev || 'neighborhood');
+    } else {
+      setAdminView('');
+    }
+  }, [role]);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -112,7 +125,20 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background font-sans flex flex-col items-center justify-start py-12">
+    <div className="min-h-screen bg-background font-sans flex flex-row items-start justify-center py-12">
+      {/* Sidebar solo para admin */}
+      {role === 'admin' && (
+        <aside className="w-56 min-h-[32rem] mr-8 bg-card border border-border rounded-xl shadow-card flex flex-col p-4 gap-2 sticky top-8">
+          <h2 className="text-lg font-bold text-primary mb-4">Menú Admin</h2>
+          <nav className="flex flex-col gap-2">
+            <button onClick={() => setAdminView('neighborhood')} className={`px-4 py-2 rounded-lg text-left hover:bg-background/60 font-medium transition ${adminView === 'neighborhood' ? 'bg-background/60 text-primary font-bold' : 'text-text'}`}>Neighborhood</button>
+            <button onClick={() => setAdminView('houses')} className={`px-4 py-2 rounded-lg text-left hover:bg-background/60 font-medium transition ${adminView === 'houses' ? 'bg-background/60 text-primary font-bold' : 'text-text'}`}>Houses</button>
+            <button onClick={() => setAdminView('neighbors')} className={`px-4 py-2 rounded-lg text-left hover:bg-background/60 font-medium transition ${adminView === 'neighbors' ? 'bg-background/60 text-primary font-bold' : 'text-text'}`}>Neighbors</button>
+            <button onClick={() => setAdminView('payments')} className={`px-4 py-2 rounded-lg text-left hover:bg-background/60 font-medium transition ${adminView === 'payments' ? 'bg-background/60 text-primary font-bold' : 'text-text'}`}>Payments</button>
+            <button onClick={() => setAdminView('financial')} className={`px-4 py-2 rounded-lg text-left hover:bg-background/60 font-medium transition ${adminView === 'financial' ? 'bg-background/60 text-primary font-bold' : 'text-text'}`}>Financial Statement</button>
+          </nav>
+        </aside>
+      )}
       <div className="w-full max-w-2xl p-8 bg-card rounded-xl shadow-card border border-border">
         <div className="flex justify-between items-center mb-6">
           <div className="flex items-center gap-3">
@@ -147,28 +173,39 @@ const App: React.FC = () => {
             )}
           </div>
         </div>
-        {error && <div className="text-error mb-4 text-center">{error}</div>}
-        {loading ? (
-          <div className="text-textSecondary text-center">Cargando...</div>
-        ) : (
-          <table className="w-full border border-border rounded-xl overflow-hidden">
-            <thead>
-              <tr className="bg-background">
-                <th className="p-3 border-b border-border text-left text-textSecondary">ID</th>
-                <th className="p-3 border-b border-border text-left text-textSecondary">Usuario</th>
-                <th className="p-3 border-b border-border text-left text-textSecondary">Rol</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map(u => (
-                <tr key={u.id} className="hover:bg-background/70">
-                  <td className="p-3 border-b border-border text-text font-medium">{u.id}</td>
-                  <td className="p-3 border-b border-border text-text">{u.username}</td>
-                  <td className="p-3 border-b border-border text-text">{u.role || 'user'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* Renderizado condicional para adminView */}
+        {role === 'admin' && adminView === 'neighborhood' && (
+          <Neighborhood />
+        )}
+        {role === 'admin' && adminView === 'houses' && (
+          <Houses token={token} />
+        )}
+        {(!role || role !== 'admin' || (adminView !== 'neighborhood' && adminView !== 'houses')) && (
+          <>
+            {error && <div className="text-error mb-4 text-center">{error}</div>}
+            {loading ? (
+              <div className="text-textSecondary text-center">Cargando...</div>
+            ) : (
+              <table className="w-full border border-border rounded-xl overflow-hidden">
+                <thead>
+                  <tr className="bg-background">
+                    <th className="p-3 border-b border-border text-left text-textSecondary">ID</th>
+                    <th className="p-3 border-b border-border text-left text-textSecondary">Usuario</th>
+                    <th className="p-3 border-b border-border text-left text-textSecondary">Rol</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map(u => (
+                    <tr key={u.id} className="hover:bg-background/70">
+                      <td className="p-3 border-b border-border text-text font-medium">{u.id}</td>
+                      <td className="p-3 border-b border-border text-text">{u.username}</td>
+                      <td className="p-3 border-b border-border text-text">{u.role || 'user'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
         )}
       </div>
     </div>
