@@ -4,6 +4,7 @@ import UserIcon from './UserIcon';
 
 import Neighborhood from './Neighborhood';
 import Houses from './Houses';
+import Neighbors from './Neighbors';
 import './App.css';
 
 
@@ -21,14 +22,15 @@ const App: React.FC = () => {
   const [role, setRole] = useState<string>(localStorage.getItem('role') || '');
   const [username, setUsername] = useState<string>('');
   const [menuOpen, setMenuOpen] = useState(false);
-  const [adminView, setAdminView] = useState<string>('');
+  const [adminView, setAdminView] = useState<'neighborhood' | 'houses' | 'neighbors'>('neighborhood');
 
   // Mostrar menú admin automáticamente si el usuario es admin
   useEffect(() => {
     if (role === 'admin') {
       setAdminView((prev) => prev || 'neighborhood');
     } else {
-      setAdminView('');
+  // Mantener un valor válido del tipo; no se usa cuando no es admin
+  setAdminView('neighborhood');
     }
   }, [role]);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -134,8 +136,6 @@ const App: React.FC = () => {
             <button onClick={() => setAdminView('neighborhood')} className={`px-4 py-2 rounded-lg text-left hover:bg-background/60 font-medium transition ${adminView === 'neighborhood' ? 'bg-background/60 text-primary font-bold' : 'text-text'}`}>Neighborhood</button>
             <button onClick={() => setAdminView('houses')} className={`px-4 py-2 rounded-lg text-left hover:bg-background/60 font-medium transition ${adminView === 'houses' ? 'bg-background/60 text-primary font-bold' : 'text-text'}`}>Houses</button>
             <button onClick={() => setAdminView('neighbors')} className={`px-4 py-2 rounded-lg text-left hover:bg-background/60 font-medium transition ${adminView === 'neighbors' ? 'bg-background/60 text-primary font-bold' : 'text-text'}`}>Neighbors</button>
-            <button onClick={() => setAdminView('payments')} className={`px-4 py-2 rounded-lg text-left hover:bg-background/60 font-medium transition ${adminView === 'payments' ? 'bg-background/60 text-primary font-bold' : 'text-text'}`}>Payments</button>
-            <button onClick={() => setAdminView('financial')} className={`px-4 py-2 rounded-lg text-left hover:bg-background/60 font-medium transition ${adminView === 'financial' ? 'bg-background/60 text-primary font-bold' : 'text-text'}`}>Financial Statement</button>
           </nav>
         </aside>
       )}
@@ -174,13 +174,23 @@ const App: React.FC = () => {
           </div>
         </div>
         {/* Renderizado condicional para adminView */}
+        {role === 'admin' && (
+          <div className="flex gap-2 mb-4">
+            <button className={`px-3 py-1 rounded ${adminView === 'neighborhood' ? 'bg-primary text-white' : 'bg-gray-200'}`} onClick={() => setAdminView('neighborhood')}>Neighborhood</button>
+            <button className={`px-3 py-1 rounded ${adminView === 'houses' ? 'bg-primary text-white' : 'bg-gray-200'}`} onClick={() => setAdminView('houses')}>Houses</button>
+            <button className={`px-3 py-1 rounded ${adminView === 'neighbors' ? 'bg-primary text-white' : 'bg-gray-200'}`} onClick={() => setAdminView('neighbors')}>Neighbors</button>
+          </div>
+        )}
         {role === 'admin' && adminView === 'neighborhood' && (
           <Neighborhood />
         )}
         {role === 'admin' && adminView === 'houses' && (
           <Houses token={token} />
         )}
-        {(!role || role !== 'admin' || (adminView !== 'neighborhood' && adminView !== 'houses')) && (
+        {role === 'admin' && adminView === 'neighbors' && (
+          <Neighbors token={token} />
+        )}
+  {(!role || role !== 'admin' || (adminView !== 'neighborhood' && adminView !== 'houses' && adminView !== 'neighbors')) && (
           <>
             {error && <div className="text-error mb-4 text-center">{error}</div>}
             {loading ? (

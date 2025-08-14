@@ -272,6 +272,110 @@ app.delete('/houses/:id', authenticateToken, async (req: Request, res: Response)
   }
 });
 
+// --- Neighbors API ---
+// Helper para generar ID: 3 letras + 2 números (p.ej. ABC12)
+function generateNeighborId() {
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const digits = '0123456789';
+  const l = () => letters[Math.floor(Math.random() * letters.length)];
+  const d = () => digits[Math.floor(Math.random() * digits.length)];
+  return `${l()}${l()}${l()}${d()}${d()}`;
+}
+
+// Listar neighbors (solo admin)
+app.get('/neighbors', authenticateToken, async (req: Request, res: Response) => {
+  if ((req as any).user.role !== 'admin') return res.status(403).json({ error: 'Solo admin puede ver los vecinos.' });
+  try {
+    const result = await pool.query('SELECT user_id, name, house_id, email, phone, created_at, updated_at FROM neighbors ORDER BY user_id');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
+
+// Crear neighbor (solo admin) - genera user_id automáticamente si no se envía
+app.post('/neighbors', authenticateToken, async (req: Request, res: Response) => {
+  if ((req as any).user.role !== 'admin') return res.status(403).json({ error: 'Solo admin puede agregar vecinos.' });
+  let { user_id, password, name, house_id, email, phone } = req.body;
+  if (!password || !name || !house_id) return res.status(400).json({ error: 'password, name y house_id son requeridos.' });
+  try {
+    // Validar formato de user_id si viene, o generar uno
+    if (user_id) {
+      user_id = String(user_id).toUpperCase();
+      if (!/^[A-Z]{3}[0-9]{2}$/.test(user_id)) return res.status(400).json({ error: 'user_id inválido. Formato: AAA00' });
+    } else {
+      // Generar evitando colisiones (intentos limitados)
+      for (let i = 0; i < 5; i++) {
+        const candidate = generateNeighborId();
+        const exists = await pool.query('SELECT 1 FROM neighbors WHERE user_id = $1', [candidate]);
+        if (exists.rowCount === 0) { user_id = candidate; break; }
+      }
+      if (!user_id) return res.status(500).json({ error: 'No se pudo generar user_id único.' });
+    }
+
+    // Verificar existencia de la casa
+    const house = await pool.query('SELECT 1 FROM houses WHERE id = $1', [house_id]);
+    if (house.rowCount === 0) return res.status(400).json({ error: 'house_id no existe.' });
+
+    // Hash de password
+    const hashed = await bcrypt.hash(password, 10);
+
+    const result = await pool.query(
+      'INSERT INTO neighbors (user_id, password, name, house_id, email, phone) VALUES ($1, $2, $3, $4, $5, $6) RETURNING user_id, name, house_id, email, phone',
+      [user_id, hashed, name, house_id, email || null, phone || null]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'user_id o email ya existe.' });
+    }
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
+
+// Actualizar neighbor (solo admin) - permite cambiar name, house_id, email, phone y password
+app.put('/neighbors/:user_id', authenticateToken, async (req: Request, res: Response) => {
+  if ((req as any).user.role !== 'admin') return res.status(403).json({ error: 'Solo admin puede modificar vecinos.' });
+  const userId = String(req.params.user_id).toUpperCase();
+  const { name, house_id, email, phone, password } = req.body;
+  if (!name && !house_id && !email && !phone && !password) return res.status(400).json({ error: 'Nada para actualizar.' });
+  try {
+    const fields: string[] = [];
+    const params: any[] = [];
+    if (name) { params.push(name); fields.push(`name = $${params.length}`); }
+    if (house_id) {
+      // validar casa
+      const h = await pool.query('SELECT 1 FROM houses WHERE id = $1', [house_id]);
+      if (h.rowCount === 0) return res.status(400).json({ error: 'house_id no existe.' });
+      params.push(house_id); fields.push(`house_id = $${params.length}`);
+    }
+    if (email !== undefined) { params.push(email || null); fields.push(`email = $${params.length}`); }
+    if (phone !== undefined) { params.push(phone || null); fields.push(`phone = $${params.length}`); }
+    if (password) { const hashed = await bcrypt.hash(password, 10); params.push(hashed); fields.push(`password = $${params.length}`); }
+    params.push(userId);
+    const result = await pool.query(`UPDATE neighbors SET ${fields.join(', ')}, updated_at = NOW() WHERE user_id = $${params.length} RETURNING user_id, name, house_id, email, phone`, params);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Vecino no encontrado.' });
+    res.json(result.rows[0]);
+  } catch (err: any) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'email ya existe.' });
+    }
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
+
+// Eliminar neighbor (solo admin)
+app.delete('/neighbors/:user_id', authenticateToken, async (req: Request, res: Response) => {
+  if ((req as any).user.role !== 'admin') return res.status(403).json({ error: 'Solo admin puede eliminar vecinos.' });
+  try {
+    const result = await pool.query('DELETE FROM neighbors WHERE user_id = $1 RETURNING user_id', [String(req.params.user_id).toUpperCase()]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Vecino no encontrado.' });
+    res.json({ deleted: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Servidor backend escuchando en http://localhost:${PORT}`);
 });
