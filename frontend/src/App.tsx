@@ -5,6 +5,7 @@ import UserIcon from './UserIcon';
 import Neighborhood from './Neighborhood';
 import Houses from './Houses';
 import Neighbors from './Neighbors';
+import NeighborPay from './NeighborPay';
 import './App.css';
 
 
@@ -23,6 +24,7 @@ const App: React.FC = () => {
   const [username, setUsername] = useState<string>('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [adminView, setAdminView] = useState<'neighborhood' | 'houses' | 'neighbors'>('neighborhood');
+  // unified login: backend decides role
 
   // Mostrar menú admin automáticamente si el usuario es admin
   useEffect(() => {
@@ -70,7 +72,7 @@ const App: React.FC = () => {
     setLoading(true);
     setError('');
     try {
-  const res = await fetch('http://localhost:4000/login', {
+      const res = await fetch(`http://localhost:4000/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
@@ -87,7 +89,7 @@ const App: React.FC = () => {
           localStorage.removeItem('role');
         }
       } else {
-        setError(data.message || 'Error de autenticación');
+        setError(data.message || data.error || 'Error de autenticación');
       }
     } catch {
       setError('No se pudo conectar con el backend');
@@ -122,8 +124,25 @@ const App: React.FC = () => {
     setUsers([]);
   };
 
-  if (!token) {
-    return <Login onLogin={handleLogin} loading={loading} error={error} />;
+  if (!token) return <Login onLogin={handleLogin} loading={loading} error={error} />;
+
+  // Render neighbor flow directly
+  if (role === 'neighbor') {
+    return (
+      <div className="min-h-screen bg-background font-sans flex flex-row items-start justify-center py-12">
+        <div className="w-full max-w-2xl p-8 bg-card rounded-xl shadow-card border border-border">
+          <div className="flex justify-between items-center mb-6">
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-bold text-primary">Mi cuenta</h1>
+            </div>
+            <div>
+              <button className="px-3 py-2 rounded-xl border border-border" onClick={handleLogout}>Cerrar sesión</button>
+            </div>
+          </div>
+          <NeighborPay token={token} />
+        </div>
+      </div>
+    );
   }
 
   return (

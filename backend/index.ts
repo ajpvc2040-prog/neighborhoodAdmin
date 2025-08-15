@@ -100,31 +100,69 @@ app.post('/register', async (req: Request, res: Response) => {
 
 // Login de usuario
 app.post('/login', async (req: Request, res: Response) => {
-  const { username, password } = req.body;
-  // Compara el hash calculado del password recibido con el hash de la base
-  console.log('Login request:', { username, password });
+  const { username, password } = req.body as any;
+  console.log('[AUTH] /login request', { username });
   if (!username || !password) return res.status(400).json({ error: 'Usuario y contraseña requeridos' });
   try {
-    const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
-    const user = result.rows[0];
-    console.log('DB user:', user);
-    if (!user) {
-      console.log('No user found for username:', username);
+    // 1) Intentar como admin/user
+    const ures = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+    const u = ures.rows[0];
+    if (u) {
+      console.log('[AUTH] Found admin/user', { id: u.id, username: u.username, role: u.role });
+      const valid = await bcrypt.compare(password, u.password);
+      console.log('[AUTH] Admin password valid?', valid);
+      if (valid) {
+        const token = jwt.sign({ id: u.id, username: u.username, role: u.role }, process.env.JWT_SECRET as string, { expiresIn: '1h' });
+        return res.json({ token, role: u.role });
+      }
+      // Si existe en admins pero el password no es válido, no continuar a neighbor por seguridad
+      console.warn('[AUTH] Admin password mismatch, denying');
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
-    // Compara la contraseña recibida con el hash usando bcrypt.compare
-  console.log('Password recibido:', password, '| Length:', password.length);
-  console.log('Hash en base:', user.password, '| Length:', user.password.length);
-  const valid = await bcrypt.compare(password, user.password);
-  console.log('Password valid?', valid);
-    if (!valid) {
-      console.log('Password mismatch for user:', username);
-      return res.status(401).json({ error: 'Credenciales inválidas' });
+
+    // 2) Intentar como neighbor (user_id)
+    const nid = String(username).toUpperCase();
+    console.log('[AUTH] Try neighbor', { user_id: nid });
+    const nres = await pool.query('SELECT user_id, name, password FROM neighbors WHERE user_id = $1', [nid]);
+    const n = nres.rows[0];
+    if (n) {
+      console.log('[AUTH] Found neighbor', { user_id: n.user_id, name: n.name });
+      const valid = await bcrypt.compare(password, n.password);
+      console.log('[AUTH] Neighbor password valid?', valid);
+      if (!valid) return res.status(401).json({ error: 'Credenciales inválidas' });
+      const token = jwt.sign({ id: n.user_id, username: n.name, role: 'neighbor' }, process.env.JWT_SECRET as string, { expiresIn: '1h' });
+      return res.json({ token, role: 'neighbor' });
     }
-    const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, process.env.JWT_SECRET as string, { expiresIn: '1h' });
-    res.json({ token, role: user.role });
+
+    // No encontrado ni en admins ni neighbors
+    console.warn('[AUTH] Not found in users nor neighbors', { username, nid });
+    return res.status(401).json({ error: 'Credenciales inválidas' });
   } catch (err) {
-    console.error('Login error:', err);
+    console.error('[AUTH] /login error', err);
+    return res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
+
+// Login de vecino (neighbors)
+app.post('/neighbor/login', async (req: Request, res: Response) => {
+  let { user_id, password } = req.body as any;
+  console.log('[AUTH] /neighbor/login request', { user_id });
+  if (!user_id || !password) return res.status(400).json({ error: 'user_id y contraseña requeridos' });
+  try {
+    user_id = String(user_id).toUpperCase();
+    const result = await pool.query('SELECT user_id, name, password FROM neighbors WHERE user_id = $1', [user_id]);
+    const neighbor = result.rows[0];
+    if (!neighbor) {
+      console.warn('[AUTH] Neighbor not found', { user_id });
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+    const valid = await bcrypt.compare(password, neighbor.password);
+    console.log('[AUTH] Neighbor password valid?', valid);
+    if (!valid) return res.status(401).json({ error: 'Credenciales inválidas' });
+    const token = jwt.sign({ id: neighbor.user_id, username: neighbor.name, role: 'neighbor' }, process.env.JWT_SECRET as string, { expiresIn: '1h' });
+    res.json({ token, role: 'neighbor' });
+  } catch (err) {
+    console.error('[AUTH] /neighbor/login error', err);
     res.status(500).json({ error: 'Error en el servidor' });
   }
 });
@@ -376,6 +414,68 @@ app.delete('/neighbors/:user_id', authenticateToken, async (req: Request, res: R
   }
 });
 
+// --- Endpoints de Neighbor (self-service) ---
+// Obtener balance del vecino autenticado
+app.get('/me/balance', authenticateToken, async (req: Request, res: Response) => {
+  try {
+    if ((req as any).user.role !== 'neighbor') return res.status(403).json({ error: 'Solo para vecinos.' });
+    const userId = String((req as any).user.id).toUpperCase();
+    const result = await pool.query('SELECT user_id, total_charges, total_payments, balance FROM neighbor_balances WHERE user_id = $1', [userId]);
+    const row = result.rows[0] || { user_id: userId, total_charges: 0, total_payments: 0, balance: 0 };
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
+
+// Listar cargos por periodo del vecino autenticado (opcional ?period=YYYY-MM-01)
+app.get('/me/period-dues', authenticateToken, async (req: Request, res: Response) => {
+  try {
+    if ((req as any).user.role !== 'neighbor') return res.status(403).json({ error: 'Solo para vecinos.' });
+    const userId = String((req as any).user.id).toUpperCase();
+    const { period } = (req as any).query as { period?: string };
+    if (period) {
+      const r = await pool.query('SELECT user_id, period, due_amount FROM neighbor_period_dues WHERE user_id = $1 AND period = $2', [userId, period]);
+      return res.json(r.rows);
+    }
+    const r = await pool.query('SELECT user_id, period, due_amount FROM neighbor_period_dues WHERE user_id = $1 ORDER BY period DESC', [userId]);
+    res.json(r.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
+
+// Listar pagos del vecino autenticado
+app.get('/me/payments', authenticateToken, async (req: Request, res: Response) => {
+  try {
+    if ((req as any).user.role !== 'neighbor') return res.status(403).json({ error: 'Solo para vecinos.' });
+    const userId = String((req as any).user.id).toUpperCase();
+    const result = await pool.query('SELECT id, amount, method, reference, paid_at, note FROM payments WHERE user_id = $1 ORDER BY paid_at DESC, id DESC', [userId]);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
+
+// Registrar un pago del vecino autenticado
+app.post('/me/payments', authenticateToken, async (req: Request, res: Response) => {
+  try {
+    if ((req as any).user.role !== 'neighbor') return res.status(403).json({ error: 'Solo para vecinos.' });
+    const userId = String((req as any).user.id).toUpperCase();
+    const { amount, method, reference, note, paid_at } = req.body as any;
+    const parsedAmount = Number(amount);
+    if (!parsedAmount || parsedAmount <= 0) return res.status(400).json({ error: 'amount debe ser > 0' });
+    const insert = await pool.query(
+      'INSERT INTO payments (user_id, amount, method, reference, note, paid_at) VALUES ($1, $2, $3, $4, $5, COALESCE($6, NOW())) RETURNING id, amount, method, reference, paid_at, note',
+      [userId, parsedAmount, method || null, reference || null, note || null, paid_at || null]
+    );
+    // Retornar pago y nuevo balance
+    const bal = await pool.query('SELECT user_id, total_charges, total_payments, balance FROM neighbor_balances WHERE user_id = $1', [userId]);
+    res.status(201).json({ payment: insert.rows[0], balance: bal.rows[0] || { user_id: userId, total_charges: 0, total_payments: parsedAmount, balance: 0 - parsedAmount } });
+  } catch (err) {
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+});
 app.listen(PORT, () => {
   console.log(`Servidor backend escuchando en http://localhost:${PORT}`);
 });
